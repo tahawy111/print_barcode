@@ -1,52 +1,54 @@
+import tkinter as tk
+from tkinter import messagebox
+from pymongo import MongoClient
+import datetime
 import win32print
 import win32con
-import datetime
+import threading  # عشان الطباعة ما تعلقش الواجهة
+
+# -------------------------------------------------------------------
+# 1. إعدادات قاعدة البيانات والطابعة
+# -------------------------------------------------------------------
+MONGO_URI = "mongodb://192.168.15.8:27017/"
+# **التعديل هنا:** اسم قاعدة البيانات الجديد
+DB_NAME = "sell_goods"
+COLLECTION_NAME = "repairs"              # اسم الـ Collection (الجدول)
+PRINTER_NAME = "Xprinter XP-350B"        # اسم طابعة الباركود
 
 
-def print_raw_tspl_to_xprinter(printer_name="Xprinter XP-350B"):
+# -------------------------------------------------------------------
+# 2. دالة الطباعة (زي اللي عدلناها قبل كده)
+# -------------------------------------------------------------------
+def print_raw_tspl_to_xprinter(printer_name, barcode_val, display_val):
     try:
-        # 1. تجهيز بيانات الباركود والرقم اللي هيظهر
-        timestamp_ms = int(datetime.datetime.now().timestamp() * 1000)
+        # **** أبعاد الملصق الواحد (راجعها بدقة) ****
+        single_label_width_mm = 45.7
+        single_label_height_mm = 12.7
 
-        # قيمة الباركود هتكون آخر 4 أرقام من الـ timestamp
-        barcode_value_for_encoding = str(timestamp_ms)[-4:]
-
-        # الرقم اللي هيظهر كنص تحت الباركود (برضه آخر 4 أرقام)
-        display_text_value = str(timestamp_ms)[-4:]
-
-        # **** أبعاد الملصق الواحد اللي انت قستها (راجعها بدقة) ****
-        single_label_width_mm = 45.7    # العرض الفعلي للملصق الواحد بالمليمتر
-        single_label_height_mm = 12.7   # الارتفاع الفعلي للملصق الواحد بالمليمتر
-
-        # **** طول الفراغ بين الملصقات (عمودياً) بالمليمتر ****
-        # المسافة بين الملصق الأول (العلوي) والثاني (السفلي)
+        # **** طول الفراغ بين الملصقات (عمودياً) ****
         vertical_gap_length_mm = 3
 
-        # *** الأبعاد الكلية "للورقة" اللي الطابعة هتشوفها عشان تطبع عليها ***
+        # *** الأبعاد الكلية "للورقة" اللي الطابعة هتشوفها ***
         total_print_width_mm = single_label_width_mm
         total_print_height_mm = (
             single_label_height_mm * 2) + vertical_gap_length_mm
 
-        # *** المسافة الرأسية لبداية الملصق الثاني (بالمليمتر) ***
+        # *** المسافة الرأسية لبداية الملصق الثاني ***
         offset_for_second_label_mm_vertical = single_label_height_mm + vertical_gap_length_mm
         offset_for_second_label_dots_vertical = int(
             offset_for_second_label_mm_vertical * (203 / 25.4))
 
         # *** مقدار الإزاحة الأفقية للشمال (0.5 سم = 5 ملم) ***
-        # هنطرح 5 ملم (وما يعادلها بالدوتس) من كل إحداثيات X
         horizontal_shift_mm = 5
         horizontal_shift_dots = int(horizontal_shift_mm * (203 / 25.4))
 
         # *** مقدار الإزاحة الرأسية لتحت (0.2 سم = 2 ملم) ***
-        # **التعديل هنا:** هنضيف 2 ملم (وما يعادلها بالدوتس) على كل إحداثيات Y
-        vertical_shift_mm = 2  # 0.2 سم = 2 ملم
-        vertical_shift_dots = int(
-            vertical_shift_mm * (203 / 25.4))  # حوالي 16 دوتس
+        vertical_shift_mm = 2
+        vertical_shift_dots = int(vertical_shift_mm * (203 / 25.4))
 
         # -----------------------------------------------
         # --- الإحداثيات الأساسية قبل الإزاحة لتسهيل التعديل ---
         # -----------------------------------------------
-        # دي إحداثيات العناصر الأساسية للملصق الواحد (اللي كانت قبل أي إزاحة)
         elfath_x_base = 100
         elfath_y_base = 2
         barcode_x_base = 110
@@ -63,40 +65,25 @@ def print_raw_tspl_to_xprinter(printer_name="Xprinter XP-350B"):
             # -----------------------------------------------
             # --- أوامر الطباعة للملصق الأول (العلوي) ---
             # -----------------------------------------------
-
-            # 1. طباعة "@elfathgroup" مصغر جداً (مع إزاحة للشمال ولتحت)
             f"TEXT {elfath_x_base - horizontal_shift_dots},{elfath_y_base + vertical_shift_dots},\"1\",0,1,1,\"@elfathgroup\"\n",
-
-            # 2. أمر طباعة الباركود Code 128 (مع إزاحة للشمال ولتحت)
-            f"BARCODE {barcode_x_base - horizontal_shift_dots},{barcode_y_base + vertical_shift_dots},\"128\",40,0,0,3,5,\"{barcode_value_for_encoding}\"\n",
-
-
-            # 3. أمر طباعة الرقم الخارجي (مع إزاحة للشمال ولتحت)
-            f"TEXT {text_x_base - horizontal_shift_dots},{text_y_base + vertical_shift_dots},\"2\",0,1,1,\"{display_text_value}\"\n",
-
+            f"BARCODE {barcode_x_base - horizontal_shift_dots},{barcode_y_base + vertical_shift_dots},\"128\",40,0,0,3,5,\"{barcode_val}\"\n",
+            f"TEXT {text_x_base - horizontal_shift_dots},{text_y_base + vertical_shift_dots},\"2\",0,1,1,\"{display_val}\"\n",
 
             # -----------------------------------------------
             # --- أوامر الطباعة للملصق الثاني (السفلي) ---
             # -----------------------------------------------
-
-            # 1. طباعة "@elfathgroup" مصغر جداً في الملصق الثاني (مع إزاحة للشمال ولتحت)
             f"TEXT {elfath_x_base - horizontal_shift_dots},{elfath_y_base + offset_for_second_label_dots_vertical + vertical_shift_dots},\"1\",0,1,1,\"@elfathgroup\"\n",
-
-            # 2. أمر طباعة الباركود Code 128 في الملصق الثاني (مع إزاحة للشمال ولتحت)
-            f"BARCODE {barcode_x_base - horizontal_shift_dots},{barcode_y_base + offset_for_second_label_dots_vertical + vertical_shift_dots},\"128\",40,0,0,3,5,\"{barcode_value_for_encoding}\"\n",
-
-            # 3. أمر طباعة الرقم الخارجي في الملصق الثاني (مع إزاحة للشمال ولتحت)
-            f"TEXT {text_x_base - horizontal_shift_dots},{text_y_base + offset_for_second_label_dots_vertical + vertical_shift_dots},\"2\",0,1,1,\"{display_text_value}\"\n",
-
+            f"BARCODE {barcode_x_base - horizontal_shift_dots},{barcode_y_base + offset_for_second_label_dots_vertical + vertical_shift_dots},\"128\",40,0,0,3,5,\"{barcode_val}\"\n",
+            f"TEXT {text_x_base - horizontal_shift_dots},{text_y_base + offset_for_second_label_dots_vertical + vertical_shift_dots},\"2\",0,1,1,\"{display_val}\"\n",
 
             "PRINT 1,1\n"
         ]
 
         raw_data = "".join(tspl_commands)
 
-        print(f"جاري إرسال أوامر TSPL للطابعة: {printer_name}...")
-        print("أوامر TSPL المرسلة:\n" + raw_data)
-
+        # -----------------------------------------------
+        # --- إرسال الأوامر للطابعة
+        # -----------------------------------------------
         hPrinter = win32print.OpenPrinter(printer_name)
         try:
             hJob = win32print.StartDocPrinter(
@@ -114,16 +101,127 @@ def print_raw_tspl_to_xprinter(printer_name="Xprinter XP-350B"):
             win32print.ClosePrinter(hPrinter)
 
     except Exception as e:
-        print(f"حدث خطأ أثناء الطباعة: {e}")
-        print("رجاءً تأكد من الآتي:")
-        print("1. الطابعة Xprinter XP-350B متوصلة وشغالة.")
-        print("2. اسم الطابعة في الكود مطابق تماماً لاسمها في الويندوز.")
-        print("3. تشغيل السكريبت كمسؤول (Run as administrator).")
-        print("4. مقاسات الملصق (SIZE و GAP) في أوامر TSPL مظبوطة بدقة مع مقاسات ملصقاتك.")
-        print("5. الطابعة فعلاً تدعم أوامر TSPL (غالباً Xprinter بتدعمها).")
-        print("6. إحداثيات الباركود والنص (X,Y) وعرض الخطوط (narrow, wide) مناسبة لحجم الملصق.")
+        messagebox.showerror("خطأ في الطباعة",
+                             f"حدث خطأ أثناء الطباعة:\n{e}\n\n"
+                             "رجاءً تأكد من الآتي:\n"
+                             "1. الطابعة متوصلة وشغالة.\n"
+                             "2. اسمها في الكود مطابق تماماً لاسمها في الويندوز.\n"
+                             "3. تشغيل التطبيق كمسؤول.")
+
+# -------------------------------------------------------------------
+# 3. دالة إرسال البيانات لـ MongoDB والطباعة
+# -------------------------------------------------------------------
 
 
-if __name__ == "__main__":
-    printer_name = "Xprinter XP-350B"
-    print_raw_tspl_to_xprinter(printer_name)
+def submit_data_and_print():
+    owner_name = owner_entry.get()
+    device_name = device_entry.get()
+    fault_description = fault_entry.get("1.0", tk.END).strip()
+    attachments = attachments_entry.get()
+
+    if not owner_name or not device_name or not fault_description:
+        messagebox.showwarning(
+            "بيانات ناقصة", "رجاءً املأ جميع الحقول المطلوبة (اسم صاحب الجهاز، اسم الجهاز، العطل).")
+        return
+
+    try:
+        client = MongoClient(MONGO_URI)
+        db = client[DB_NAME]  # <--- هنا بيتم استخدام DB_NAME الجديد
+        collection = db[COLLECTION_NAME]
+
+        # توليد باركود جديد للعملية الحالية
+        timestamp_ms = int(datetime.datetime.now().timestamp() * 1000)
+        barcode_val = str(timestamp_ms)[-4:]
+        display_val = barcode_val
+
+        # البيانات اللي هتتخزن في MongoDB
+        record = {
+            "owner_name": owner_name,
+            "device_name": device_name,
+            "fault_description": fault_description,
+            "attachments": attachments,
+            "barcode_value": barcode_val,
+            "timestamp": datetime.datetime.now()
+        }
+
+        # إدخال البيانات في قاعدة البيانات
+        collection.insert_one(record)
+        messagebox.showinfo("نجاح", "تم حفظ البيانات بنجاح في قاعدة البيانات.")
+
+        # مسح الحقول بعد الحفظ
+        owner_entry.delete(0, tk.END)
+        device_entry.delete(0, tk.END)
+        fault_entry.delete("1.0", tk.END)
+        attachments_entry.delete(0, tk.END)
+
+        # تحديث النص بتاع آخر عملية طباعة
+        last_print_label.config(
+            text=f"آخر باركود مطبوع: {display_val}\nاسم صاحب الجهاز: {owner_name}\nاسم الجهاز: {device_name}")
+
+        # بدء عملية الطباعة في Thread منفصل عشان الواجهة متوقفش
+        threading.Thread(target=print_raw_tspl_to_xprinter,
+                         args=(PRINTER_NAME, barcode_val, display_val)).start()
+
+    except Exception as e:
+        messagebox.showerror("خطأ في الاتصال بقاعدة البيانات",
+                             f"حدث خطأ أثناء الاتصال بـ MongoDB:\n{e}\n\n"
+                             "رجاءً تأكد من تشغيل سيرفر MongoDB على العنوان {MONGO_URI}.")
+    finally:
+        if 'client' in locals() and client:
+            client.close()
+
+
+# -------------------------------------------------------------------
+# 4. بناء واجهة Tkinter
+# -------------------------------------------------------------------
+root = tk.Tk()
+root.title("تطبيق إدارة صيانة الأجهزة")
+root.geometry("500x550")
+root.resizable(False, False)
+
+# تحسينات جمالية
+root.configure(bg="#e0f2f7")
+root.option_add('*Font', 'Arial 12')
+
+# إطار للادخال
+input_frame = tk.LabelFrame(
+    root, text="إدخال بيانات الجهاز", padx=20, pady=20, bg="#e0f2f7", fg="#004d40")
+input_frame.pack(padx=20, pady=20, fill="both", expand=True)
+
+# اسم صاحب الجهاز
+tk.Label(input_frame, text="اسم صاحب الجهاز:", bg="#e0f2f7",
+         fg="#004d40").grid(row=0, column=0, sticky="w", pady=5)
+owner_entry = tk.Entry(input_frame, width=40)
+owner_entry.grid(row=0, column=1, pady=5, padx=10)
+
+# اسم الجهاز
+tk.Label(input_frame, text="اسم الجهاز:", bg="#e0f2f7",
+         fg="#004d40").grid(row=1, column=0, sticky="w", pady=5)
+device_entry = tk.Entry(input_frame, width=40)
+device_entry.grid(row=1, column=1, pady=5, padx=10)
+
+# العطل
+tk.Label(input_frame, text="العطل:", bg="#e0f2f7", fg="#004d40").grid(
+    row=2, column=0, sticky="nw", pady=5)
+fault_entry = tk.Text(input_frame, width=40, height=5)
+fault_entry.grid(row=2, column=1, pady=5, padx=10)
+
+# المرفقات (اختياري)
+tk.Label(input_frame, text="المرفقات:", bg="#e0f2f7",
+         fg="#004d40").grid(row=3, column=0, sticky="w", pady=5)
+attachments_entry = tk.Entry(input_frame, width=40)
+attachments_entry.grid(row=3, column=1, pady=5, padx=10)
+
+# زرار الإضافة والطباعة
+submit_button = tk.Button(root, text="إضافة وطباعة باركود", command=submit_data_and_print,
+                          bg="#00796b", fg="white", activebackground="#004d40", activeforeground="white",
+                          relief="raised", bd=3)
+submit_button.pack(pady=10)
+
+# عرض آخر نتيجة مطبوعة
+last_print_label = tk.Label(root, text="آخر باركود مطبوع: (لا يوجد)",
+                            bg="#e0f2f7", fg="#d32f2f", font=('Arial', 10, 'bold'))
+last_print_label.pack(pady=10)
+
+
+root.mainloop()
