@@ -1,23 +1,21 @@
 import tkinter as tk
 from tkinter import messagebox
-from pymongo import MongoClient
 import datetime
 import win32print
 import win32con
 import threading  # عشان الطباعة ما تعلقش الواجهة
+import requests    # المكتبة الجديدة لإرسال الـ HTTP Requests
 
 # -------------------------------------------------------------------
-# 1. إعدادات قاعدة البيانات والطابعة
+# 1. إعدادات الـ API والطابعة
 # -------------------------------------------------------------------
-MONGO_URI = "mongodb://192.168.15.8:27017/"
-# **التعديل هنا:** اسم قاعدة البيانات الجديد
-DB_NAME = "sell_goods"
-COLLECTION_NAME = "repairs"              # اسم الـ Collection (الجدول)
+API_URL = "http://192.168.15.8/repaingCard/add-repairing-card-to-print"
+API_SECRET = "mySuperSecretPassword123"  # الـ Secret key للـ API
 PRINTER_NAME = "Xprinter XP-350B"        # اسم طابعة الباركود
 
 
 # -------------------------------------------------------------------
-# 2. دالة الطباعة (زي اللي عدلناها قبل كده)
+# 2. دالة الطباعة (زي ما هي بدون تغيير)
 # -------------------------------------------------------------------
 def print_raw_tspl_to_xprinter(printer_name, barcode_val, display_val):
     try:
@@ -109,7 +107,7 @@ def print_raw_tspl_to_xprinter(printer_name, barcode_val, display_val):
                              "3. تشغيل التطبيق كمسؤول.")
 
 # -------------------------------------------------------------------
-# 3. دالة إرسال البيانات لـ MongoDB والطباعة
+# 3. دالة إرسال البيانات للـ API والطباعة
 # -------------------------------------------------------------------
 
 
@@ -117,42 +115,52 @@ def submit_data_and_print():
     owner_name = owner_entry.get()
     device_name = device_entry.get()
     fault_description = fault_entry.get("1.0", tk.END).strip()
-    attachments = attachments_entry.get()
+    phone_number = phone_number_entry.get()
+    attachments = attachments_entry.get()  # رجعنا اسم حقل المرفقات تاني
 
-    if not owner_name or not device_name or not fault_description:
+    if not owner_name or not device_name or not fault_description or not phone_number:
         messagebox.showwarning(
-            "بيانات ناقصة", "رجاءً املأ جميع الحقول المطلوبة (اسم صاحب الجهاز، اسم الجهاز، العطل).")
+            "بيانات ناقصة", "رجاءً املأ جميع الحقول المطلوبة (اسم صاحب الجهاز، اسم الجهاز، العطل، رقم التليفون).")
         return
 
     try:
-        client = MongoClient(MONGO_URI)
-        db = client[DB_NAME]  # <--- هنا بيتم استخدام DB_NAME الجديد
-        collection = db[COLLECTION_NAME]
-
         # توليد باركود جديد للعملية الحالية
         timestamp_ms = int(datetime.datetime.now().timestamp() * 1000)
         barcode_val = str(timestamp_ms)[-4:]
         display_val = barcode_val
 
-        # البيانات اللي هتتخزن في MongoDB
-        record = {
-            "owner_name": owner_name,
-            "device_name": device_name,
-            "fault_description": fault_description,
-            "attachments": attachments,
-            "barcode_value": barcode_val,
-            "timestamp": datetime.datetime.now()
+        # تجهيز الـ Body بتاع الريكويست (الـ Payload)
+        payload = {
+            "secret": API_SECRET,
+            "name": owner_name,
+            "damageName": device_name + " - " + fault_description,
+            "barcode": barcode_val,
+            "phoneNumber": phone_number,
+            "state": False,
+            # لو الـ API بتاعك بيدعم حقل للمرفقات، ممكن تبعته هنا
+            # "attachments": attachments
         }
 
-        # إدخال البيانات في قاعدة البيانات
-        collection.insert_one(record)
-        messagebox.showinfo("نجاح", "تم حفظ البيانات بنجاح في قاعدة البيانات.")
+        # إرسال الـ POST Request
+        response = requests.post(API_URL, json=payload)
+        response.raise_for_status()
+
+        # فحص الرد من الـ API
+        api_response_data = response.json()
+        if response.status_code in [200, 201]:
+            messagebox.showinfo(
+                "نجاح", f"تم حفظ البيانات بنجاح عن طريق الـ API.\nالرد: {api_response_data}")
+        else:
+            messagebox.showerror(
+                "خطأ في الـ API", f"حدث خطأ من الـ API.\nالحالة: {response.status_code}\nالرد: {api_response_data}")
+            return
 
         # مسح الحقول بعد الحفظ
         owner_entry.delete(0, tk.END)
         device_entry.delete(0, tk.END)
         fault_entry.delete("1.0", tk.END)
-        attachments_entry.delete(0, tk.END)
+        phone_number_entry.delete(0, tk.END)
+        attachments_entry.delete(0, tk.END)  # مسح حقل المرفقات
 
         # تحديث النص بتاع آخر عملية طباعة
         last_print_label.config(
@@ -162,13 +170,12 @@ def submit_data_and_print():
         threading.Thread(target=print_raw_tspl_to_xprinter,
                          args=(PRINTER_NAME, barcode_val, display_val)).start()
 
+    except requests.exceptions.RequestException as e:
+        messagebox.showerror("خطأ في الاتصال بالـ API",
+                             f"حدث خطأ أثناء الاتصال بالـ API:\n{e}\n\n"
+                             "رجاءً تأكد من تشغيل سيرفر الـ API على العنوان {API_URL} وأن العنوان صحيح.")
     except Exception as e:
-        messagebox.showerror("خطأ في الاتصال بقاعدة البيانات",
-                             f"حدث خطأ أثناء الاتصال بـ MongoDB:\n{e}\n\n"
-                             "رجاءً تأكد من تشغيل سيرفر MongoDB على العنوان {MONGO_URI}.")
-    finally:
-        if 'client' in locals() and client:
-            client.close()
+        messagebox.showerror("خطأ غير متوقع", f"حدث خطأ غير متوقع: {e}")
 
 
 # -------------------------------------------------------------------
@@ -176,7 +183,7 @@ def submit_data_and_print():
 # -------------------------------------------------------------------
 root = tk.Tk()
 root.title("تطبيق إدارة صيانة الأجهزة")
-root.geometry("500x550")
+root.geometry("500x600")
 root.resizable(False, False)
 
 # تحسينات جمالية
@@ -200,17 +207,24 @@ tk.Label(input_frame, text="اسم الجهاز:", bg="#e0f2f7",
 device_entry = tk.Entry(input_frame, width=40)
 device_entry.grid(row=1, column=1, pady=5, padx=10)
 
-# العطل
+# العطل (نص متعدد الأسطر)
 tk.Label(input_frame, text="العطل:", bg="#e0f2f7", fg="#004d40").grid(
     row=2, column=0, sticky="nw", pady=5)
 fault_entry = tk.Text(input_frame, width=40, height=5)
 fault_entry.grid(row=2, column=1, pady=5, padx=10)
 
-# المرفقات (اختياري)
-tk.Label(input_frame, text="المرفقات:", bg="#e0f2f7",
+# حقل رقم التليفون
+tk.Label(input_frame, text="رقم التليفون:", bg="#e0f2f7",
          fg="#004d40").grid(row=3, column=0, sticky="w", pady=5)
+phone_number_entry = tk.Entry(input_frame, width=40)
+phone_number_entry.grid(row=3, column=1, pady=5, padx=10)
+
+# **التعديل هنا:** رجعنا اسم الحقل "المرفقات"
+tk.Label(input_frame, text="المرفقات:", bg="#e0f2f7",
+         fg="#004d40").grid(row=4, column=0, sticky="w", pady=5)
 attachments_entry = tk.Entry(input_frame, width=40)
-attachments_entry.grid(row=3, column=1, pady=5, padx=10)
+attachments_entry.grid(row=4, column=1, pady=5, padx=10)
+
 
 # زرار الإضافة والطباعة
 submit_button = tk.Button(root, text="إضافة وطباعة باركود", command=submit_data_and_print,
