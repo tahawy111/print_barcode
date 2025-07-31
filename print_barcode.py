@@ -234,9 +234,32 @@ def submit_data_and_print():
         submit_button.config(state="normal")
         owner_entry.focus_set()
 
+# -------------------------------------------------------------------
+# 5. دالة الطباعة اليدوية للباركود
+# -------------------------------------------------------------------
+
+
+def manual_print_barcode():
+    manual_barcode_val = manual_barcode_entry.get().strip()
+    if not manual_barcode_val:
+        messagebox.showwarning(
+            "بيانات ناقصة", "يرجى إدخال رقم الباركود للطباعة.")
+        manual_print_status_var.set("الرجاء إدخال باركود.")
+        return
+
+    manual_print_status_var.set(
+        f"جاري طباعة الباركود: {manual_barcode_val}...")
+    # نشغل الطباعة في Thread عشان ميوقفش الواجهة
+    print_thread = threading.Thread(target=print_raw_tspl_to_xprinter,
+                                    args=(PRINTER_NAME, manual_barcode_val, manual_barcode_val))
+    print_thread.start()
+    manual_print_status_var.set(
+        f"تم إرسال الباركود '{manual_barcode_val}' للطباعة.")
+    manual_barcode_entry.delete(0, END)
+
 
 # -------------------------------------------------------------------
-# 5. بناء واجهة ttkbootstrap الرسومية
+# 6. بناء واجهة ttkbootstrap الرسومية (مع التعديلات)
 # -------------------------------------------------------------------
 
 # --- إعداد النافذة الرئيسية ---
@@ -273,9 +296,17 @@ def create_context_menu(widget):
     widget.bind("<Button-3>", show_menu)
 
 
-# --- إطار إدخال البيانات ---
+# --- إنشاء Notebook (نظام التابات) ---
+notebook = ttk.Notebook(root)
+notebook.pack(pady=20, padx=20, expand=True, fill=BOTH)
+
+# --- التاب الأولى: إضافة جهاز جديد ---
+new_device_tab = ttk.Frame(notebook, padding=(20, 15))
+notebook.add(new_device_tab, text="إضافة جهاز جديد")
+
+# --- إطار إدخال البيانات في التاب الأولى ---
 input_frame = ttk.LabelFrame(
-    root, text="بيانات الجهاز الجديد", padding=(20, 15))
+    new_device_tab, text="بيانات الجهاز الجديد", padding=(20, 15))
 input_frame.pack(padx=20, pady=20, fill=X, anchor=N)
 input_frame.columnconfigure(1, weight=1)
 
@@ -289,10 +320,8 @@ for i, text in enumerate(labels_texts):
     label.grid(row=i, column=0, sticky=W, padx=5, pady=10)
 
     if text == "وصف العطل:":
-        entry = ttk.Entry(input_frame, width=40, font=(
-            "Arial", 11))  # تم التغيير لـ ttk.Entry
+        entry = ttk.Entry(input_frame, width=40, font=("Arial", 11))
         entry.grid(row=i, column=1, sticky=EW, padx=5, pady=10)
-        # تم حذف كود Scrollbar
         fault_entry = entry
     else:
         entry = ttk.Entry(input_frame, width=40, font=("Arial", 11))
@@ -312,7 +341,7 @@ attachments_entry = entries[labels_texts[4]]
 
 # --- زر الإضافة والطباعة ---
 submit_button = ttk.Button(
-    root,
+    new_device_tab,  # الزر هيكون في التاب دي
     text="إضافة وطباعة باركود",
     command=submit_data_and_print,
     bootstyle=(PRIMARY, OUTLINE),  # شكل مميز للزر
@@ -321,9 +350,9 @@ submit_button = ttk.Button(
 submit_button.pack(pady=(0, 10))  # مسافة أقل بين الأزرار
 
 
-# --- أزرار الطباعة الجديدة ---
+# --- أزرار الطباعة الجديدة في التاب الأولى ---
 reprint_barcode_button = ttk.Button(
-    root,
+    new_device_tab,  # الزر هيكون في التاب دي
     text="إعادة طباعة الباركود",
     command=reprint_barcode_action,
     bootstyle=(INFO, OUTLINE),  # لون مختلف عشان يبان
@@ -333,7 +362,7 @@ reprint_barcode_button = ttk.Button(
 reprint_barcode_button.pack(pady=(0, 10))
 
 print_receipt_button = ttk.Button(
-    root,
+    new_device_tab,  # الزر هيكون في التاب دي
     text="طباعة إيصال الصيانة",
     command=print_receipt_action,
     bootstyle=(SUCCESS, OUTLINE),  # لون مختلف عشان يبان
@@ -343,8 +372,8 @@ print_receipt_button = ttk.Button(
 print_receipt_button.pack(pady=(0, 20))
 
 
-# --- إطار عرض الحالة ---
-status_frame = ttk.LabelFrame(root, text="الحالة", padding=(10, 10))
+# --- إطار عرض الحالة للتاب الأولى ---
+status_frame = ttk.LabelFrame(new_device_tab, text="الحالة", padding=(10, 10))
 status_frame.pack(padx=20, pady=10, fill=X, anchor=S)
 
 last_print_label = ttk.Label(status_frame, text="آخر عملية: (لا يوجد)", font=(
@@ -356,7 +385,42 @@ status_label = ttk.Label(status_frame, textvariable=status_var, font=(
     "Arial", 9, "italic"), bootstyle=INFO)
 status_label.pack(side=RIGHT, padx=5)
 
-# --- متغيرات لتخزين آخر بيانات تم استخدامها للطباعة ---
+
+# --- التاب الثانية: طباعة باركود يدوي ---
+manual_print_tab = ttk.Frame(notebook, padding=(20, 15))
+notebook.add(manual_print_tab, text="طباعة باركود يدوي")
+
+# --- محتويات التاب الثانية ---
+manual_input_frame = ttk.LabelFrame(
+    manual_print_tab, text="إدخال باركود للطباعة", padding=(20, 15))
+manual_input_frame.pack(padx=20, pady=50, fill=X, anchor=N)
+manual_input_frame.columnconfigure(1, weight=1)
+
+manual_barcode_label = ttk.Label(
+    manual_input_frame, text="رقم الباركود:", font=("Arial", 11))
+manual_barcode_label.grid(row=0, column=0, sticky=W, padx=5, pady=10)
+
+manual_barcode_entry = ttk.Entry(
+    manual_input_frame, width=30, font=("Arial", 12))
+manual_barcode_entry.grid(row=0, column=1, sticky=EW, padx=5, pady=10)
+create_context_menu(manual_barcode_entry)  # تفعيل قائمة السياق
+
+manual_print_button = ttk.Button(
+    manual_print_tab,
+    text="طباعة الباركود",
+    command=manual_print_barcode,
+    bootstyle=(PRIMARY, OUTLINE),
+    padding=(20, 10)
+)
+manual_print_button.pack(pady=(20, 10))
+
+manual_print_status_var = ttk.StringVar(value="الرجاء إدخال باركود للطباعة.")
+manual_print_status_label = ttk.Label(manual_print_tab, textvariable=manual_print_status_var, font=(
+    "Arial", 10, "italic"), bootstyle=INFO)
+manual_print_status_label.pack(pady=(10, 0))
+
+
+# --- متغيرات لتخزين آخر بيانات تم استخدامها للطباعة (للتات الأولى) ---
 root.last_barcode_val = None
 root.last_display_val = None
 root.last_repair_card_id = None  # لتخزين الـ ID بتاع الكارت بعد الحفظ
